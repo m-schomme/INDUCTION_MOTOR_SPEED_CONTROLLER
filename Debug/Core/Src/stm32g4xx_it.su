@@ -9,4 +9,3 @@
 ../Core/Src/stm32g4xx_it.c:196:6:TIM2_IRQHandler	8	static
 ../Core/Src/stm32g4xx_it.c:210:6:TIM3_IRQHandler	8	static
 ../Core/Src/stm32g4xx_it.c:224:6:EXTI15_10_IRQHandler	8	static
-../Core/Src/stm32g4xx_it.c:238:6:DMAMUX_OVR_IRQHandler	4	static

@@ -64,20 +64,6 @@ TIM_HandleTypeDef htim3;
 osThreadId_t ReadPotentHandle;
 const osThreadAttr_t ReadPotent_attributes = {
   .name = "ReadPotent",
-  .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 128 * 4
-};
-/* Definitions for SVPWM */
-osThreadId_t SVPWMHandle;
-const osThreadAttr_t SVPWM_attributes = {
-  .name = "SVPWM",
-  .priority = (osPriority_t) osPriorityLow,
-  .stack_size = 128 * 4
-};
-/* Definitions for ReadSensors */
-osThreadId_t ReadSensorsHandle;
-const osThreadAttr_t ReadSensors_attributes = {
-  .name = "ReadSensors",
   .priority = (osPriority_t) osPriorityLow,
   .stack_size = 128 * 4
 };
@@ -85,11 +71,17 @@ const osThreadAttr_t ReadSensors_attributes = {
 osThreadId_t FOCHandle;
 const osThreadAttr_t FOC_attributes = {
   .name = "FOC",
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityHigh,
   .stack_size = 128 * 4
+};
+/* Definitions for FOCsem */
+osSemaphoreId_t FOCsemHandle;
+const osSemaphoreAttr_t FOCsem_attributes = {
+  .name = "FOCsem"
 };
 /* USER CODE BEGIN PV */
 uint32_t adcValues[3];  // Holds ADC results for 3 channels
+static uint32_t adc_local_copy[3] = {0};
 float voltageA = 0.0f;
 float voltageB = 0.0f;
 float currentA = 0.0f;
@@ -122,8 +114,6 @@ static void MX_TIM1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
 void StartPotent(void *argument);
-void StartSVPWM(void *argument);
-void StartSensors(void *argument);
 void StartFOC(void *argument);
 
 /* USER CODE BEGIN PFP */
@@ -171,7 +161,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   pi_controller_init(Kp_Id, Ki_Id,Kp_Iq,Ki_Iq, Kp_Speed, Ki_Speed);
 
-  HAL_TIM_Base_Start(&htim1);
+  HAL_TIM_Base_Start_IT(&htim1);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adcValues, 3);
 
   HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
@@ -192,6 +182,10 @@ int main(void)
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
+  /* Create the semaphores(s) */
+  /* creation of FOCsem */
+  FOCsemHandle = osSemaphoreNew(1, 1, &FOCsem_attributes);
+
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
@@ -207,12 +201,6 @@ int main(void)
   /* Create the thread(s) */
   /* creation of ReadPotent */
   ReadPotentHandle = osThreadNew(StartPotent, NULL, &ReadPotent_attributes);
-
-  /* creation of SVPWM */
-  SVPWMHandle = osThreadNew(StartSVPWM, NULL, &SVPWM_attributes);
-
-  /* creation of ReadSensors */
-  ReadSensorsHandle = osThreadNew(StartSensors, NULL, &ReadSensors_attributes);
 
   /* creation of FOC */
   FOCHandle = osThreadNew(StartFOC, NULL, &FOC_attributes);
@@ -333,10 +321,10 @@ static void MX_ADC1_Init(void)
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
   hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
-  hadc1.Init.ContinuousConvMode = ENABLE;
+  hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 3;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_CC1;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_TRGO2;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
@@ -421,8 +409,12 @@ static void MX_TIM1_Init(void)
   {
     Error_Handler();
   }
+  if (HAL_TIM_OC_Init(&htim1) != HAL_OK)
+  {
+    Error_Handler();
+  }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_UPDATE;
-  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_RESET;
+  sMasterConfig.MasterOutputTrigger2 = TIM_TRGO2_OC4REF;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim1, &sMasterConfig) != HAL_OK)
   {
@@ -444,6 +436,11 @@ static void MX_TIM1_Init(void)
     Error_Handler();
   }
   if (HAL_TIM_PWM_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  if (HAL_TIM_OC_ConfigChannel(&htim1, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }
@@ -546,9 +543,6 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
-  /* DMAMUX_OVR_IRQn interrupt configuration */
-  HAL_NVIC_SetPriority(DMAMUX_OVR_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(DMAMUX_OVR_IRQn);
 
 }
 
@@ -597,50 +591,6 @@ void StartPotent(void *argument)
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_StartSVPWM */
-/**
-* @brief Function implementing the SVPWM thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartSVPWM */
-void StartSVPWM(void *argument)
-{
-  /* USER CODE BEGIN StartSVPWM */
-  /* Infinite loop */
-  for(;;)
-  {
-	  svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
-	  osDelay(1);
-  }
-  /* USER CODE END StartSVPWM */
-}
-
-/* USER CODE BEGIN Header_StartSensors */
-/**
-* @brief Function implementing the ReadSensors thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartSensors */
-void StartSensors(void *argument)
-{
-  /* USER CODE BEGIN StartSensors */
-  /* Infinite loop */
-  for(;;)
-  {
-//	voltageA = (adcValues[0] * VREF) / ADC_MAX;
-//	voltageB = (adcValues[1] * VREF) / ADC_MAX;
-//	currentA = (voltageA - 1.65f) / SENSOR_SENSITIVITY;
-//	currentB = (voltageB - 1.65f) / SENSOR_SENSITIVITY;
-	ia = (((float)adcValues[0] * VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
-	ib = (((float)adcValues[1] *VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
-	RotorAngle = ((TIM3->CNT) * 2 * M_PI) / 1000 ;
-	osDelay(1);
-  }
-  /* USER CODE END StartSensors */
-}
-
 /* USER CODE BEGIN Header_StartFOC */
 /**
 * @brief Function implementing the FOC thread.
@@ -654,23 +604,41 @@ void StartFOC(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	float Id_measured, Iq_measured;
-	float Id_ref, Iq_ref;
-	float vd, vq;
-	float sin_theta, cos_theta;
+	if (osSemaphoreAcquire( FOCsemHandle, osWaitForever) == osOK ){
+		__disable_irq();
+		adc_local_copy[0] = adcValues[0];
+		adc_local_copy[1] = adcValues[1];
+		adc_local_copy[2] = adcValues[2];
+		__enable_irq();
 
-	// sample current sensors and encoder
-	cos_theta = fast_cos(RotorAngle);
-	sin_theta = fast_sin(RotorAngle);
-	clarke_park_transform(ia, ib, sin_theta, cos_theta, &Id_measured, &Iq_measured);
+		float Id_measured, Iq_measured;
+		float Id_ref, Iq_ref;
+		float vd, vq;
+		float sin_theta, cos_theta;
 
-	Id_ref = 0.0f;
-	Iq_ref = desiredRPM / 100.0f ;
+		cos_theta = fast_cos(RotorAngle);
+		sin_theta = fast_sin(RotorAngle);
 
-	vd = pi_controller_Id(Id_ref, Id_measured);
-	vq = pi_controller_Iq(Iq_ref, Iq_measured);
-	inverse_park_transform(vd, vq, sin_theta, cos_theta, &valpha, &vbeta);
-    osDelay(1);
+		ia = (((float)adc_local_copy[0] * VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
+		ib = (((float)adc_local_copy[1] *VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
+		clarke_park_transform(ia, ib, sin_theta, cos_theta, &Id_measured, &Iq_measured);
+
+		Id_ref = 0.0f;
+		Iq_ref = desiredRPM / 100.0f ;
+
+		vd = pi_controller_Id(Id_ref, Id_measured);
+		vq = pi_controller_Iq(Iq_ref, Iq_measured);
+		inverse_park_transform(vd, vq, sin_theta, cos_theta, &valpha, &vbeta);
+
+		RotorAngle = ((TIM3->CNT) * 2 * M_PI) / 1000;
+
+		svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
+
+		TIM1->CCR1 = pwm_u;
+		TIM1->CCR2 = pwm_v;
+		TIM1->CCR3 = pwm_w;
+		TIM1->CCR4 = ARR ;
+	}
   }
   /* USER CODE END StartFOC */
 }
@@ -686,10 +654,8 @@ void StartFOC(void *argument)
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
-	if (htim->Instance ==TIM1){
-		TIM1->CCR1 = pwm_u;
-		TIM1->CCR2 = pwm_v;
-		TIM1->CCR3 = pwm_w;
+	if (htim->Instance == TIM1){
+		osSemaphoreRelease(FOCsemHandle);
 	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM2)
