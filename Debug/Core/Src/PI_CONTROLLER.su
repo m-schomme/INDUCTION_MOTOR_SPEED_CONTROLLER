@@ -1,0 +1,4 @@
+../Core/Src/PI_CONTROLLER.c:16:6:pi_controller_init	32	static
+../Core/Src/PI_CONTROLLER.c:38:7:pi_controller_Id	32	static
+../Core/Src/PI_CONTROLLER.c:43:7:pi_controller_Iq	32	static
+../Core/Src/PI_CONTROLLER.c:48:7:pi_controller_speed	32	static
