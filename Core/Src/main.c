@@ -369,8 +369,8 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
+  sConfig.Channel = ADC_CHANNEL_2;
   sConfig.Rank = ADC_REGULAR_RANK_2;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -378,7 +378,9 @@ static void MX_ADC1_Init(void)
 
   /** Configure Regular Channel
   */
+  sConfig.Channel = ADC_CHANNEL_14;
   sConfig.Rank = ADC_REGULAR_RANK_3;
+  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -589,7 +591,7 @@ void StartPotent(void *argument)
   for(;;)
   {
     // sample potentiometer every 5 ms
-    HAL_ADC_Start_IT(&hadc1);
+	desiredRPM = (adcValues[2] * DESIRED_RPM_MAX)/ADC_MAX;
     osDelay(5);
   }
   /* USER CODE END 5 */
@@ -609,6 +611,7 @@ void StartSVPWM(void *argument)
   for(;;)
   {
 	  svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
+	  osDelay(1);
   }
   /* USER CODE END StartSVPWM */
 }
@@ -630,8 +633,8 @@ void StartSensors(void *argument)
 //	voltageB = (adcValues[1] * VREF) / ADC_MAX;
 //	currentA = (voltageA - 1.65f) / SENSOR_SENSITIVITY;
 //	currentB = (voltageB - 1.65f) / SENSOR_SENSITIVITY;
-	ia = (adcValues[0] / ADC_MAX) * VREF / SENSOR_SENSITIVITY;
-	ib = (adcValues[1] / ADC_MAX) * VREF / SENSOR_SENSITIVITY;
+	ia = (((float)adcValues[0] * VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
+	ib = (((float)adcValues[1] *VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
 	RotorAngle = ((TIM3->CNT) * 2 * M_PI) / 1000 ;
 	osDelay(1);
   }
