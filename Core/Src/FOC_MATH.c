@@ -39,7 +39,7 @@ void clarke_park_transform(float ia, float ib, float sin_theta, float cos_theta,
 }
 
 // inverse park transform (dq to αβ)
-void inverse_park_transform(float vd, float vq, float sin_theta, float cos_theta, float *valpha, float *vbeta) {
+void inverse_park_transform(volatile float vd, volatile float vq, volatile float sin_theta, volatile float cos_theta, volatile float *valpha, volatile float *vbeta) {
     *valpha = vd * cos_theta - vq * sin_theta;
     *vbeta = vd * sin_theta + vq * cos_theta;
 }
@@ -52,8 +52,8 @@ void inverse_clarke_transform(float valpha, float vbeta, float *va, float *vb, f
 }
 
 // space vector pwm
-void svpwm(float valpha, float vbeta, float vbus, uint32_t pwm_period,
-            uint32_t *pwm_u, uint32_t *pwm_v, uint32_t *pwm_w)
+void svpwm(volatile float valpha, volatile float vbeta, float vbus, uint32_t pwm_period,
+            volatile uint32_t *pwm_u, volatile uint32_t *pwm_v, volatile uint32_t *pwm_w)
 {
     // 1. normalize voltages to DC bus
     if (vbus == 0.0f) {
@@ -129,9 +129,9 @@ void svpwm(float valpha, float vbeta, float vbus, uint32_t pwm_period,
     }
 
     // 5. clamp and assign
-    if (TA < 0) TA = 0; if (TA > pwm_period_f) TA = pwm_period_f;
-    if (TB < 0) TB = 0; if (TB > pwm_period_f) TB = pwm_period_f;
-    if (TC < 0) TC = 0; if (TC > pwm_period_f) TC = pwm_period_f;
+    if (TA < 0) {TA = 0;}; if (TA > pwm_period_f) {TA = pwm_period_f;};
+    if (TB < 0) {TB = 0;}; if (TB > pwm_period_f) {TB = pwm_period_f;};
+    if (TC < 0) {TC = 0;}; if (TC > pwm_period_f) {TC = pwm_period_f;};
 
     *pwm_u = (uint32_t)(TA);
     *pwm_v = (uint32_t)(TB);

@@ -29,10 +29,10 @@ float fast_cos(float theta);
 void pre_calc_sin_cos(float theta, float *sin_theta, float *cos_theta);
 
 void clarke_park_transform(float ia, float ib, float sin_theta, float cos_theta, float *id, float *iq);
-void inverse_park_transform(float vd, float vq, float sin_theta, float cos_theta, float *valpha, float *vbeta);
+void inverse_park_transform(volatile float vd, volatile float vq, volatile float sin_theta, volatile float cos_theta, volatile float *valpha, volatile float *vbeta);
 void inverse_clarke_transform(float valpha, float vbeta, float *va, float *vb, float *vc);
-void svpwm(float valpha, float vbeta, float vbus, uint32_t pwm_period,
-			uint32_t *pwm_u, uint32_t *pwm_v, uint32_t *pwm_w);
+void svpwm(volatile float valpha, volatile float vbeta, float vbus, uint32_t pwm_period,
+			volatile uint32_t *pwm_u, volatile uint32_t *pwm_v, volatile uint32_t *pwm_w);
 
 
 #endif /* SRC_FOC_MATH_H_ */

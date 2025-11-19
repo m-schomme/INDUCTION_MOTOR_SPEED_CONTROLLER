@@ -59,29 +59,36 @@ ADC_HandleTypeDef hadc1;
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim3;
 
-/* Definitions for Task1 */
-osThreadId_t Task1Handle;
-const osThreadAttr_t Task1_attributes = {
-  .name = "Task1",
+/* Definitions for ReadPotent */
+osThreadId_t ReadPotentHandle;
+const osThreadAttr_t ReadPotent_attributes = {
+  .name = "ReadPotent",
   .priority = (osPriority_t) osPriorityNormal,
   .stack_size = 128 * 4
 };
-/* Definitions for Task2 */
-osThreadId_t Task2Handle;
-const osThreadAttr_t Task2_attributes = {
-  .name = "Task2",
+/* Definitions for SVPWM */
+osThreadId_t SVPWMHandle;
+const osThreadAttr_t SVPWM_attributes = {
+  .name = "SVPWM",
   .priority = (osPriority_t) osPriorityLow,
   .stack_size = 128 * 4
 };
-/* Definitions for Task3 */
-osThreadId_t Task3Handle;
-const osThreadAttr_t Task3_attributes = {
-  .name = "Task3",
+/* Definitions for ReadSensors */
+osThreadId_t ReadSensorsHandle;
+const osThreadAttr_t ReadSensors_attributes = {
+  .name = "ReadSensors",
+  .priority = (osPriority_t) osPriorityLow,
+  .stack_size = 128 * 4
+};
+/* Definitions for FOC */
+osThreadId_t FOCHandle;
+const osThreadAttr_t FOC_attributes = {
+  .name = "FOC",
   .priority = (osPriority_t) osPriorityLow,
   .stack_size = 128 * 4
 };
 /* USER CODE BEGIN PV */
-uint32_t adcValues[3];  // Holds ADC results for 2 channels
+uint32_t adcValues[3];  // Holds ADC results for 3 channels
 float voltageA = 0.0f;
 float voltageB = 0.0f;
 float currentA = 0.0f;
@@ -97,13 +104,13 @@ float Ki_Iq = 1.0f;
 float Kp_Speed = 1.0f;
 float Ki_Speed = 1.0f;
 
+volatile float ia = 0.0f, ib = 0.0f;
 volatile float valpha = 0.0f, vbeta = 0.0f;
 volatile uint32_t pwm_u = 0, pwm_v = 0, pwm_w = 0;
 volatile uint32_t potentiometerValue = 0;
 volatile float desiredRPM = 0.0f;
 
 
-osSemaphoreId_t pwmSemaphoreHandle;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -112,9 +119,10 @@ static void MX_GPIO_Init(void);
 static void MX_TIM1_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_TIM3_Init(void);
-void StartTask1(void *argument);
-void StartTask2(void *argument);
-void StartTask3(void *argument);
+void StartPotent(void *argument);
+void StartSVPWM(void *argument);
+void StartSensors(void *argument);
+void StartFOC(void *argument);
 
 /* USER CODE BEGIN PFP */
 
@@ -158,7 +166,6 @@ int main(void)
   MX_ADC1_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
-  pwmSemaphoreHandle = osSemaphoreCreateBinary();
   pi_controller_init(Kp_Id, Ki_Id,Kp_Iq,Ki_Iq, Kp_Speed, Ki_Speed);
 
   HAL_TIM_Base_Start(&htim1);
@@ -172,10 +179,7 @@ int main(void)
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_3);
 
-
-  float theta = 0.0f;
-  float valpha, vbeta;
-  uint32_t pwm_u, pwm_v, pwm_w;
+  HAL_TIM_Base_Start(&htim3);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -198,14 +202,17 @@ int main(void)
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of Task1 */
-  Task1Handle = osThreadNew(StartTask1, NULL, &Task1_attributes);
+  /* creation of ReadPotent */
+  ReadPotentHandle = osThreadNew(StartPotent, NULL, &ReadPotent_attributes);
 
-  /* creation of Task2 */
-  Task2Handle = osThreadNew(StartTask2, NULL, &Task2_attributes);
+  /* creation of SVPWM */
+  SVPWMHandle = osThreadNew(StartSVPWM, NULL, &SVPWM_attributes);
 
-  /* creation of Task3 */
-  Task3Handle = osThreadNew(StartTask3, NULL, &Task3_attributes);
+  /* creation of ReadSensors */
+  ReadSensorsHandle = osThreadNew(StartSensors, NULL, &ReadSensors_attributes);
+
+  /* creation of FOC */
+  FOCHandle = osThreadNew(StartFOC, NULL, &FOC_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -241,7 +248,6 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	HAL_Delay(1);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -455,6 +461,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_IC_InitTypeDef sConfigIC = {0};
 
@@ -462,11 +469,23 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 180;
+  htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 5000;
+  htim3.Init.Period = 1000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_ETRMODE2;
+  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
+  sClockSourceConfig.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1;
+  sClockSourceConfig.ClockFilter = 0;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   if (HAL_TIM_IC_Init(&htim3) != HAL_OK)
   {
     Error_Handler();
@@ -498,7 +517,6 @@ static void MX_TIM3_Init(void)
   */
 static void MX_GPIO_Init(void)
 {
-  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -507,16 +525,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-
-  /*Configure GPIO pin : PULSE_Pin */
-  GPIO_InitStruct.Pin = PULSE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(PULSE_GPIO_Port, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 5, 0);
-  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -524,136 +533,103 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void AngularPositionUpdate(){
-	Pulse_Count++;
-	SingleRev_Pulse_Count++;
-	if(SingleRev_Pulse_Count >= 1000){
-		SingleRev_Pulse_Count =0;
-	}
-	RotorAngle = (SingleRev_Pulse_Count * 2 * M_PI)/1000;
-}
-
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-    if (GPIO_Pin == PULSEB5_Pin)// PB5
-    {
-        AngularPositionUpdate();
-    }
-}
-
-void LineCurrentUpdate(){
-    voltageA = (adcValues[0] * VREF) / ADC_MAX;
-    voltageB = (adcValues[1] * VREF) / ADC_MAX;
-
-    currentA = (voltageA - 1.65f) / SENSOR_SENSITIVITY; // If centered at 1.65V
-    currentB = (voltageB - 1.65f) / SENSOR_SENSITIVITY;
-}
-
-void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef* hadc)
-{
-    if (hadc->Instance == ADC1)
-    {
-    	LineCurrentUpdate();
-    	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-		osSemaphoreGiveFromISR(pwmSemaphoreHandle, &xHigherPriorityTaskWoken);
-		portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-    }
-    else if (hadc->Instance == ADC2){
-    	uint32_t raw = HAL_ADC_GetValue(hadc2);
-    	potentiometerValue = (float)raw;
-    	desiredRPM = (potentiometerValue * DESIRED_RPM_MAX) / ADC_MAX;
-    }
-}
-
-void UserInput() {
-	if (HAL_ADC_Start_IT(&hadc2) !=HAL_OK){
-		Error_Handler();
-	}
-}
 /* USER CODE END 4 */
 
-/* USER CODE BEGIN Header_StartTask1 */
+/* USER CODE BEGIN Header_StartPotent */
 /**
-  * @brief  Function implementing the Task1 thread.
+  * @brief  Function implementing the ReadPotent thread.
   * @param  argument: Not used
   * @retval None
   */
-/* USER CODE END Header_StartTask1 */
-void StartTask1(void *argument)
+/* USER CODE END Header_StartPotent */
+void StartPotent(void *argument)
 {
   /* USER CODE BEGIN 5 */
   /* Infinite loop */
   for(;;)
   {
     // sample potentiometer every 5 ms
-    HAL_ADC_Start_IT(&hadc2);
+    HAL_ADC_Start_IT(&hadc1);
     osDelay(5);
   }
   /* USER CODE END 5 */
 }
 
-/* USER CODE BEGIN Header_StartTask2 */
+/* USER CODE BEGIN Header_StartSVPWM */
 /**
-* @brief Function implementing the Task2 thread.
+* @brief Function implementing the SVPWM thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_StartTask2 */
-void StartTask2(void *argument)
+/* USER CODE END Header_StartSVPWM */
+void StartSVPWM(void *argument)
 {
-  /* USER CODE BEGIN StartTask2 */
+  /* USER CODE BEGIN StartSVPWM */
   /* Infinite loop */
   for(;;)
   {
-	// generate svpwm
-	if (osSemaphoreAcquire(pwmSemaphoreHandle, osWaitForever) == osOK){
-		svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
-
-		TIM1->CCR1 = pwm_u;
-		TIM1->CCR2 = pwm_v;
-		TIM1->CCR3 = pwm_w;
-	}
+	  svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
   }
-  /* USER CODE END StartTask2 */
+  /* USER CODE END StartSVPWM */
 }
 
-/* USER CODE BEGIN Header_StartTask3 */
+/* USER CODE BEGIN Header_StartSensors */
 /**
-* @brief Function implementing the Task3 thread.
+* @brief Function implementing the ReadSensors thread.
 * @param argument: Not used
 * @retval None
 */
-/* USER CODE END Header_StartTask3 */
-void StartTask3(void *argument)
+/* USER CODE END Header_StartSensors */
+void StartSensors(void *argument)
 {
-  /* USER CODE BEGIN StartTask3 */
-  float ia, ib;
-  float ialpha, ibeta;
-  float Id_measured, Iq_measured;
-  float Id_ref, Iq_ref;
-  float vd, vq;
-  float sin_theta, cos_theta;
-
-
+  /* USER CODE BEGIN StartSensors */
   /* Infinite loop */
   for(;;)
   {
-	  // sample current sensors and encoder
-    Ia = (adcValues[0] / ADC_MAX) * VREF / SENSOR_SENSITIVITY;
-    Ib = (adcValues[1] / ADC_MAX) * VREF / SENSOR_SENSITIVITY;
-    cos_theta = fast_cos(RotorAngle);
-    sin_theta = fast_sin(RotorAngle);
-    clarke_park_transform(ia, ib, sin_theta, cos_theta, id, iq);
-
-    Id_ref = 0.0f;
-    Iq_ref = desiredRPM / 100.0f ;
-
-    vd = pi_controller_Id(Id_ref, Id_measured);
-    vq = pi_controller_Iq(Iq_ref, Iq_measured);
-    inverse_park_transform(vd, vq, sin_theta, cos_theta, &valpha, &vbeta);
-    osDelay();
+//	voltageA = (adcValues[0] * VREF) / ADC_MAX;
+//	voltageB = (adcValues[1] * VREF) / ADC_MAX;
+//	currentA = (voltageA - 1.65f) / SENSOR_SENSITIVITY;
+//	currentB = (voltageB - 1.65f) / SENSOR_SENSITIVITY;
+	ia = (adcValues[0] / ADC_MAX) * VREF / SENSOR_SENSITIVITY;
+	ib = (adcValues[1] / ADC_MAX) * VREF / SENSOR_SENSITIVITY;
+	RotorAngle = ((TIM3->CNT) * 2 * M_PI) / 1000 ;
+	osDelay(1);
   }
-  /* USER CODE END StartTask3 */
+  /* USER CODE END StartSensors */
+}
+
+/* USER CODE BEGIN Header_StartFOC */
+/**
+* @brief Function implementing the FOC thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_StartFOC */
+void StartFOC(void *argument)
+{
+  /* USER CODE BEGIN StartFOC */
+  /* Infinite loop */
+  for(;;)
+  {
+	float Id_measured, Iq_measured;
+	float Id_ref, Iq_ref;
+	float vd, vq;
+	float sin_theta, cos_theta;
+
+	// sample current sensors and encoder
+	cos_theta = fast_cos(RotorAngle);
+	sin_theta = fast_sin(RotorAngle);
+	clarke_park_transform(ia, ib, sin_theta, cos_theta, &Id_measured, &Iq_measured);
+
+	Id_ref = 0.0f;
+	Iq_ref = desiredRPM / 100.0f ;
+
+	vd = pi_controller_Id(Id_ref, Id_measured);
+	vq = pi_controller_Iq(Iq_ref, Iq_measured);
+	inverse_park_transform(vd, vq, sin_theta, cos_theta, &valpha, &vbeta);
+    osDelay(1);
+  }
+  /* USER CODE END StartFOC */
 }
 
 /**
@@ -668,7 +644,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
 	if (htim->Instance ==TIM1){
-		osSemaphoreRelease(pwmSemaphoreHandle);
+		TIM1->CCR1 = pwm_u;
+		TIM1->CCR2 = pwm_v;
+		TIM1->CCR3 = pwm_w;
 	}
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM2)
@@ -676,7 +654,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-
   /* USER CODE END Callback 1 */
 }
 
