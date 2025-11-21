@@ -120,17 +120,16 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef* hadc)
     PA0     ------> ADC1_IN1
     PA1     ------> ADC1_IN2
     PB11     ------> ADC1_IN14
-    PB12     ------> ADC1_IN11
     */
     GPIO_InitStruct.Pin = IA_Pin|IB_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = POTENTIOMETER_Pin|THERMISTOR_Pin;
+    GPIO_InitStruct.Pin = POTENTIOMETER_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_ANALOG;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    HAL_GPIO_Init(POTENTIOMETER_GPIO_Port, &GPIO_InitStruct);
 
     /* ADC1 DMA Init */
     /* ADC1 Init */
@@ -181,11 +180,10 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef* hadc)
     PA0     ------> ADC1_IN1
     PA1     ------> ADC1_IN2
     PB11     ------> ADC1_IN14
-    PB12     ------> ADC1_IN11
     */
     HAL_GPIO_DeInit(GPIOA, IA_Pin|IB_Pin);
 
-    HAL_GPIO_DeInit(GPIOB, POTENTIOMETER_Pin|THERMISTOR_Pin);
+    HAL_GPIO_DeInit(POTENTIOMETER_GPIO_Port, POTENTIOMETER_Pin);
 
     /* ADC1 DMA DeInit */
     HAL_DMA_DeInit(hadc->DMA_Handle);
@@ -214,6 +212,9 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
     /* USER CODE END TIM1_MspInit 0 */
     /* Peripheral clock enable */
     __HAL_RCC_TIM1_CLK_ENABLE();
+    /* TIM1 interrupt Init */
+    HAL_NVIC_SetPriority(TIM1_UP_TIM16_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(TIM1_UP_TIM16_IRQn);
     /* USER CODE BEGIN TIM1_MspInit 1 */
 
     /* USER CODE END TIM1_MspInit 1 */
@@ -223,15 +224,15 @@ void HAL_TIM_PWM_MspInit(TIM_HandleTypeDef* htim_pwm)
 }
 
 /**
-  * @brief TIM_Base MSP Initialization
+  * @brief TIM_Encoder MSP Initialization
   * This function configures the hardware resources used in this example
-  * @param htim_base: TIM_Base handle pointer
+  * @param htim_encoder: TIM_Encoder handle pointer
   * @retval None
   */
-void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
+void HAL_TIM_Encoder_MspInit(TIM_HandleTypeDef* htim_encoder)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  if(htim_base->Instance==TIM3)
+  if(htim_encoder->Instance==TIM3)
   {
     /* USER CODE BEGIN TIM3_MspInit 0 */
 
@@ -240,28 +241,17 @@ void HAL_TIM_Base_MspInit(TIM_HandleTypeDef* htim_base)
     __HAL_RCC_TIM3_CLK_ENABLE();
 
     __HAL_RCC_GPIOA_CLK_ENABLE();
-    __HAL_RCC_GPIOD_CLK_ENABLE();
     /**TIM3 GPIO Configuration
+    PA4     ------> TIM3_CH2
     PA6     ------> TIM3_CH1
-    PD2     ------> TIM3_ETR
     */
-    GPIO_InitStruct.Pin = GPIO_PIN_6;
+    GPIO_InitStruct.Pin = ENC_2_Pin|ENC_1_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
     HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = ENCODER_Pin;
-    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
-    GPIO_InitStruct.Pull = GPIO_NOPULL;
-    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-    GPIO_InitStruct.Alternate = GPIO_AF2_TIM3;
-    HAL_GPIO_Init(ENCODER_GPIO_Port, &GPIO_InitStruct);
-
-    /* TIM3 interrupt Init */
-    HAL_NVIC_SetPriority(TIM3_IRQn, 5, 0);
-    HAL_NVIC_EnableIRQ(TIM3_IRQn);
     /* USER CODE BEGIN TIM3_MspInit 1 */
 
     /* USER CODE END TIM3_MspInit 1 */
@@ -279,18 +269,26 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
 
     /* USER CODE END TIM1_MspPostInit 0 */
 
+    __HAL_RCC_GPIOF_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
     __HAL_RCC_GPIOA_CLK_ENABLE();
     __HAL_RCC_GPIOB_CLK_ENABLE();
     /**TIM1 GPIO Configuration
+    PF0-OSC_IN     ------> TIM1_CH3N
     PC0     ------> TIM1_CH1
     PC1     ------> TIM1_CH2
     PC2     ------> TIM1_CH3
     PC3     ------> TIM1_CH4
     PA7     ------> TIM1_CH1N
-    PB0     ------> TIM1_CH2N
-    PB1     ------> TIM1_CH3N
+    PB14     ------> TIM1_CH2N
     */
+    GPIO_InitStruct.Pin = W_LO_Pin;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
+    HAL_GPIO_Init(W_LO_GPIO_Port, &GPIO_InitStruct);
+
     GPIO_InitStruct.Pin = U_HI_Pin|V_HI_Pin|W_HI_Pin|GPIO_PIN_3;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -305,12 +303,12 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef* htim)
     GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
     HAL_GPIO_Init(U_LO_GPIO_Port, &GPIO_InitStruct);
 
-    GPIO_InitStruct.Pin = V_LO_Pin|W_LO_Pin;
+    GPIO_InitStruct.Pin = V_LO_Pin;
     GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
     GPIO_InitStruct.Pull = GPIO_NOPULL;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     GPIO_InitStruct.Alternate = GPIO_AF6_TIM1;
-    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+    HAL_GPIO_Init(V_LO_GPIO_Port, &GPIO_InitStruct);
 
     /* USER CODE BEGIN TIM1_MspPostInit 1 */
 
@@ -333,6 +331,9 @@ void HAL_TIM_PWM_MspDeInit(TIM_HandleTypeDef* htim_pwm)
     /* USER CODE END TIM1_MspDeInit 0 */
     /* Peripheral clock disable */
     __HAL_RCC_TIM1_CLK_DISABLE();
+
+    /* TIM1 interrupt DeInit */
+    HAL_NVIC_DisableIRQ(TIM1_UP_TIM16_IRQn);
     /* USER CODE BEGIN TIM1_MspDeInit 1 */
 
     /* USER CODE END TIM1_MspDeInit 1 */
@@ -341,14 +342,14 @@ void HAL_TIM_PWM_MspDeInit(TIM_HandleTypeDef* htim_pwm)
 }
 
 /**
-  * @brief TIM_Base MSP De-Initialization
+  * @brief TIM_Encoder MSP De-Initialization
   * This function freeze the hardware resources used in this example
-  * @param htim_base: TIM_Base handle pointer
+  * @param htim_encoder: TIM_Encoder handle pointer
   * @retval None
   */
-void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
+void HAL_TIM_Encoder_MspDeInit(TIM_HandleTypeDef* htim_encoder)
 {
-  if(htim_base->Instance==TIM3)
+  if(htim_encoder->Instance==TIM3)
   {
     /* USER CODE BEGIN TIM3_MspDeInit 0 */
 
@@ -357,15 +358,11 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef* htim_base)
     __HAL_RCC_TIM3_CLK_DISABLE();
 
     /**TIM3 GPIO Configuration
+    PA4     ------> TIM3_CH2
     PA6     ------> TIM3_CH1
-    PD2     ------> TIM3_ETR
     */
-    HAL_GPIO_DeInit(GPIOA, GPIO_PIN_6);
+    HAL_GPIO_DeInit(GPIOA, ENC_2_Pin|ENC_1_Pin);
 
-    HAL_GPIO_DeInit(ENCODER_GPIO_Port, ENCODER_Pin);
-
-    /* TIM3 interrupt DeInit */
-    HAL_NVIC_DisableIRQ(TIM3_IRQn);
     /* USER CODE BEGIN TIM3_MspDeInit 1 */
 
     /* USER CODE END TIM3_MspDeInit 1 */

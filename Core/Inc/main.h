@@ -62,6 +62,8 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define W_LO_Pin GPIO_PIN_0
+#define W_LO_GPIO_Port GPIOF
 #define U_HI_Pin GPIO_PIN_0
 #define U_HI_GPIO_Port GPIOC
 #define V_HI_Pin GPIO_PIN_1
@@ -72,22 +74,20 @@ void Error_Handler(void);
 #define IA_GPIO_Port GPIOA
 #define IB_Pin GPIO_PIN_1
 #define IB_GPIO_Port GPIOA
+#define ENC_2_Pin GPIO_PIN_4
+#define ENC_2_GPIO_Port GPIOA
+#define ENC_1_Pin GPIO_PIN_6
+#define ENC_1_GPIO_Port GPIOA
 #define U_LO_Pin GPIO_PIN_7
 #define U_LO_GPIO_Port GPIOA
-#define V_LO_Pin GPIO_PIN_0
-#define V_LO_GPIO_Port GPIOB
-#define W_LO_Pin GPIO_PIN_1
-#define W_LO_GPIO_Port GPIOB
 #define POTENTIOMETER_Pin GPIO_PIN_11
 #define POTENTIOMETER_GPIO_Port GPIOB
-#define THERMISTOR_Pin GPIO_PIN_12
-#define THERMISTOR_GPIO_Port GPIOB
+#define V_LO_Pin GPIO_PIN_14
+#define V_LO_GPIO_Port GPIOB
 #define T_SWDIO_Pin GPIO_PIN_13
 #define T_SWDIO_GPIO_Port GPIOA
 #define T_SWCLK_Pin GPIO_PIN_14
 #define T_SWCLK_GPIO_Port GPIOA
-#define ENCODER_Pin GPIO_PIN_2
-#define ENCODER_GPIO_Port GPIOD
 #define T_SWO_Pin GPIO_PIN_3
 #define T_SWO_GPIO_Port GPIOB
 

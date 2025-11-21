@@ -1,3 +1,4 @@
+"./Core/Src/ACIM.o"
 "./Core/Src/FOC_MATH.o"
 "./Core/Src/PI_CONTROLLER.o"
 "./Core/Src/app_freertos.o"

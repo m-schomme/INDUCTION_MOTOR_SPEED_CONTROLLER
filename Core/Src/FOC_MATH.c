@@ -9,7 +9,7 @@
 #include "FOC_MATH.h"
 
 // normalizes angle to [0, 2PI) by +/- 2PI
-void norm_angle_rad(float *theta) {
+void norm_angle_rad(volatile float *theta) {
     while (*theta < 0) *theta += TWO_PI;
     while (*theta >= TWO_PI) *theta -= TWO_PI;
 }

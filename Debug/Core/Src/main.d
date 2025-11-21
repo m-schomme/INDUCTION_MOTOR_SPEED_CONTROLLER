@@ -81,7 +81,7 @@ Core/Src/main.o: ../Core/Src/main.c ../Core/Inc/main.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/include/semphr.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h \
  ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h \
- ../Core/Src/PI_CONTROLLER.h
+ ../Core/Src/PI_CONTROLLER.h ../Core/Src/ACIM.h
 ../Core/Inc/main.h:
 ../Drivers/STM32G4xx_HAL_Driver/Inc/stm32g4xx_hal.h:
 ../Core/Inc/stm32g4xx_hal_conf.h:
@@ -166,3 +166,4 @@ C:/Users/maryr/STM32CubeIDE/workspace_1.19.0/SIN_PWM_NUCLEOG474RE/Drivers/CMSIS_
 ../Middlewares/Third_Party/FreeRTOS/Source/include/queue.h:
 ../Middlewares/Third_Party/FreeRTOS/Source/include/task.h:
 ../Core/Src/PI_CONTROLLER.h:
+../Core/Src/ACIM.h:

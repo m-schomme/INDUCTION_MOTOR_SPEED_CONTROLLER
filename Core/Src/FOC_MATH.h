@@ -23,7 +23,7 @@
 
 #define DEG_TO_RAD(deg) ((deg) * 0.017453292519943f)  // π/180
 
-void norm_angle_rad(float *theta);
+void norm_angle_rad(volatile float *theta);
 float fast_sin(float theta);
 float fast_cos(float theta);
 void pre_calc_sin_cos(float theta, float *sin_theta, float *cos_theta);

@@ -27,6 +27,7 @@
 #include "FOC_MATH.h"
 #include "semphr.h"
 #include "PI_CONTROLLER.h"
+#include "ACIM.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -38,12 +39,14 @@
 /* USER CODE BEGIN PD */
 #define vbus 200.0f // test
 #define PWM_PERIOD 4250
-#define TEST_FREQ 60.0f
+#define TEST_FREQ 30.0f
 #define ADC_MAX     4095.0f
 #define VREF        3.3f
 #define SENSOR_SENSITIVITY 0.1f
 #define DESIRED_RPM_MAX 1725.0f
-
+#define ENC_PPR             1000
+#define COUNTS_PER_REV      (ENC_PPR * 4)
+#define MOTOR_POLE_PAIRS 2
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -64,7 +67,7 @@ TIM_HandleTypeDef htim3;
 osThreadId_t ReadPotentHandle;
 const osThreadAttr_t ReadPotent_attributes = {
   .name = "ReadPotent",
-  .priority = (osPriority_t) osPriorityLow,
+  .priority = (osPriority_t) osPriorityNormal,
   .stack_size = 128 * 4
 };
 /* Definitions for FOC */
@@ -72,7 +75,7 @@ osThreadId_t FOCHandle;
 const osThreadAttr_t FOC_attributes = {
   .name = "FOC",
   .priority = (osPriority_t) osPriorityHigh,
-  .stack_size = 128 * 4
+  .stack_size = 400 * 4
 };
 /* Definitions for FOCsem */
 osSemaphoreId_t FOCsemHandle;
@@ -80,30 +83,51 @@ const osSemaphoreAttr_t FOCsem_attributes = {
   .name = "FOCsem"
 };
 /* USER CODE BEGIN PV */
+
+// sensor inputs
 uint32_t adcValues[3];  // Holds ADC results for 3 channels
 static uint32_t adc_local_copy[3] = {0};
 float voltageA = 0.0f;
 float voltageB = 0.0f;
 float currentA = 0.0f;
 float currentB = 0.0f;
-int Pulse_Count = 0;
-int SingleRev_Pulse_Count = 0;
-float RotorAngle = 0.0f;
+volatile uint32_t potentiometerValue = 0;
 
-float Kp_Id = 1.0f;
+// pi control variables
+float Kp_Id = 0.1f;
 float Ki_Id = 1.0f;
-float Kp_Iq = 1.0f;
+float Kp_Iq = 0.1f;
 float Ki_Iq = 1.0f;
-float Kp_Speed = 1.0f;
-float Ki_Speed = 1.0f;
+float Kp_Speed = 0.05f;
+float Ki_Speed = 0.5f;
 
+// FOC variables
 volatile float ia = 0.0f, ib = 0.0f;
 volatile float valpha = 0.0f, vbeta = 0.0f;
 volatile uint32_t pwm_u = 0, pwm_v = 0, pwm_w = 0;
-volatile uint32_t potentiometerValue = 0;
+typedef enum { INIT, MOTOR_FOC } motor_state_t;
+volatile  motor_state_t MOTOR_STATE = INIT;
+
+// encoder values
 volatile float desiredRPM = 0.0f;
+float theta = 0.0f;
+int encoder_ready = 0;
+volatile int32_t last_count = 0;
+volatile float mech_rps = 0.0f;
+volatile float RotorAngle = 0.0f;
+float mech_angle_Radian = 0.0f;
+int32_t delta = 0;
+int Rotor_direction = 0;
+volatile int32_t curr_count = 0;
 
+int test_task = 0;
 
+ACIM_Params_t params = {
+	.P = 2,
+	.Lm = 0.413f,
+	.Lr = 111.65f,
+	.psi_r_ref = 0.8f
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -160,6 +184,7 @@ int main(void)
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   pi_controller_init(Kp_Id, Ki_Id,Kp_Iq,Ki_Iq, Kp_Speed, Ki_Speed);
+  ACIM_Init(&params);
 
   HAL_TIM_Base_Start_IT(&htim1);
   HAL_ADC_Start_DMA(&hadc1, (uint32_t*)adcValues, 3);
@@ -172,7 +197,7 @@ int main(void)
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_2);
   HAL_TIMEx_PWMN_Start(&htim1, TIM_CHANNEL_3);
 
-  HAL_TIM_Base_Start(&htim3);
+  HAL_TIM_Encoder_Start(&htim3, TIM_CHANNEL_ALL);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -319,12 +344,12 @@ static void MX_ADC1_Init(void)
   hadc1.Init.DataAlign = ADC_DATAALIGN_RIGHT;
   hadc1.Init.GainCompensation = 0;
   hadc1.Init.ScanConvMode = ADC_SCAN_ENABLE;
-  hadc1.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  hadc1.Init.EOCSelection = ADC_EOC_SEQ_CONV;
   hadc1.Init.LowPowerAutoWait = DISABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.NbrOfConversion = 3;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
-  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_TRGO2;
+  hadc1.Init.ExternalTrigConv = ADC_EXTERNALTRIG_T1_TRGO;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_RISING;
   hadc1.Init.DMAContinuousRequests = ENABLE;
   hadc1.Init.Overrun = ADC_OVR_DATA_PRESERVED;
@@ -368,7 +393,7 @@ static void MX_ADC1_Init(void)
   */
   sConfig.Channel = ADC_CHANNEL_14;
   sConfig.Rank = ADC_REGULAR_RANK_3;
-  sConfig.SamplingTime = ADC_SAMPLETIME_2CYCLES_5;
+  sConfig.SamplingTime = ADC_SAMPLETIME_247CYCLES_5;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
   {
     Error_Handler();
@@ -480,9 +505,8 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 0 */
 
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_Encoder_InitTypeDef sConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
-  TIM_IC_InitTypeDef sConfigIC = {0};
 
   /* USER CODE BEGIN TIM3_Init 1 */
 
@@ -490,36 +514,25 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 1000;
+  htim3.Init.Period = 65535;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
-  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_ETRMODE2;
-  sClockSourceConfig.ClockPolarity = TIM_CLOCKPOLARITY_NONINVERTED;
-  sClockSourceConfig.ClockPrescaler = TIM_CLOCKPRESCALER_DIV1;
-  sClockSourceConfig.ClockFilter = 0;
-  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_TIM_IC_Init(&htim3) != HAL_OK)
+  sConfig.EncoderMode = TIM_ENCODERMODE_TI1;
+  sConfig.IC1Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC1Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC1Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC1Filter = 0;
+  sConfig.IC2Polarity = TIM_ICPOLARITY_RISING;
+  sConfig.IC2Selection = TIM_ICSELECTION_DIRECTTI;
+  sConfig.IC2Prescaler = TIM_ICPSC_DIV1;
+  sConfig.IC2Filter = 0;
+  if (HAL_TIM_Encoder_Init(&htim3, &sConfig) != HAL_OK)
   {
     Error_Handler();
   }
   sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
   sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
   if (HAL_TIMEx_MasterConfigSynchronization(&htim3, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sConfigIC.ICPolarity = TIM_INPUTCHANNELPOLARITY_RISING;
-  sConfigIC.ICSelection = TIM_ICSELECTION_DIRECTTI;
-  sConfigIC.ICPrescaler = TIM_ICPSC_DIV1;
-  sConfigIC.ICFilter = 0;
-  if (HAL_TIM_IC_ConfigChannel(&htim3, &sConfigIC, TIM_CHANNEL_1) != HAL_OK)
   {
     Error_Handler();
   }
@@ -558,10 +571,10 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
@@ -585,7 +598,7 @@ void StartPotent(void *argument)
   for(;;)
   {
     // sample potentiometer every 5 ms
-	desiredRPM = (adcValues[2] * DESIRED_RPM_MAX)/ADC_MAX;
+	test_task = test_task + 1;
     osDelay(5);
   }
   /* USER CODE END 5 */
@@ -601,6 +614,9 @@ void StartPotent(void *argument)
 void StartFOC(void *argument)
 {
   /* USER CODE BEGIN StartFOC */
+	float w_ref = 0.0f;
+	float torque_ref = 0.0f;
+	int32_t Previous_Theta = 0;
   /* Infinite loop */
   for(;;)
   {
@@ -611,33 +627,100 @@ void StartFOC(void *argument)
 		adc_local_copy[2] = adcValues[2];
 		__enable_irq();
 
+		potentiometerValue = adc_local_copy[2];
+		desiredRPM = (potentiometerValue * DESIRED_RPM_MAX)/ADC_MAX;
+
 		float Id_measured, Iq_measured;
 		float Id_ref, Iq_ref;
 		float vd, vq;
 		float sin_theta, cos_theta;
 
-		cos_theta = fast_cos(RotorAngle);
-		sin_theta = fast_sin(RotorAngle);
+		/* Read encoder count */
+		curr_count = __HAL_TIM_GET_COUNTER(&htim3);
 
-		ia = (((float)adc_local_copy[0] * VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
-		ib = (((float)adc_local_copy[1] *VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
-		clarke_park_transform(ia, ib, sin_theta, cos_theta, &Id_measured, &Iq_measured);
+		/* Calculate delta taking rollover into account */
+		delta = curr_count - last_count;
+		if (delta != 0){
+			encoder_ready= 1;
+		}
 
-		Id_ref = 0.0f;
-		Iq_ref = desiredRPM / 100.0f ;
+		/* Handle rollover of 16-bit timer */
+		if(delta > 32767)      delta -= 65536;
+		else if(delta < -32768) delta += 65536;
 
-		vd = pi_controller_Id(Id_ref, Id_measured);
-		vq = pi_controller_Iq(Iq_ref, Iq_measured);
-		inverse_park_transform(vd, vq, sin_theta, cos_theta, &valpha, &vbeta);
+		/* Save new count for next calculation */
+		last_count = curr_count;
 
-		RotorAngle = ((TIM3->CNT) * 2 * M_PI) / 1000;
+		/* Mechanical Speed (RPM) Delta is the pulses in the most recent rotation divided by the pulses per rotation and time.
+		* set to 1 second so that I can see it change*/
+		mech_rps = (float)delta  / (COUNTS_PER_REV * .010f);
 
-		svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
+		/* Mechanical angle (0 → 2π) */
+		int32_t pos = curr_count % COUNTS_PER_REV;
+		if(pos < 0) pos += COUNTS_PER_REV;
 
-		TIM1->CCR1 = pwm_u;
-		TIM1->CCR2 = pwm_v;
-		TIM1->CCR3 = pwm_w;
-		TIM1->CCR4 = ARR ;
+		mech_angle_Radian = ( (float)pos * 2.0f * M_PI) / COUNTS_PER_REV;
+
+		/* Electrical angle */
+		Previous_Theta = RotorAngle;
+		RotorAngle = (mech_angle_Radian * MOTOR_POLE_PAIRS);
+		if(Previous_Theta < RotorAngle){
+		  Rotor_direction = 1;
+		}
+		else{
+		  Rotor_direction = 0;
+		}
+
+
+		switch (MOTOR_STATE){
+			case INIT:
+			// initial
+				valpha = 0.7f *  vbus * arm_cos_f32(theta);
+				vbeta = 0.7f * vbus * arm_sin_f32(theta);
+				svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
+
+				TIM1->CCR1 = pwm_u;
+				TIM1->CCR2 = pwm_v;
+				TIM1->CCR3 = pwm_w;
+				TIM1->CCR4 = TIM1->ARR;
+
+				theta += 2.0f * M_PI * TEST_FREQ * 0.00005f;
+				norm_angle_rad(&theta);
+
+//				if (encoder_ready) {
+//					MOTOR_STATE = MOTOR_FOC;
+//				}
+
+				break;
+			case MOTOR_FOC:
+			// control once encoder feedback
+				norm_angle_rad(&RotorAngle);
+
+				cos_theta = fast_cos(RotorAngle);
+				sin_theta = fast_sin(RotorAngle);
+
+				ia = (((float)adc_local_copy[0] * VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
+				ib = (((float)adc_local_copy[1] *VREF / ADC_MAX) - 1.65f) / SENSOR_SENSITIVITY;
+				clarke_park_transform(ia, ib, sin_theta, cos_theta, &Id_measured, &Iq_measured);
+
+				w_ref = (mech_rps * MOTOR_POLE_PAIRS) / 2;
+				torque_ref = pi_controller_speed(desiredRPM, mech_rps);
+				ACIM_Compute(w_ref, torque_ref, &Id_ref, &Iq_ref);
+
+				vd = pi_controller_Id(Id_ref, Id_measured);
+				vq = pi_controller_Iq(Iq_ref, Iq_measured);
+				inverse_park_transform(vd, vq, sin_theta, cos_theta, &valpha, &vbeta);
+				svpwm(valpha,vbeta, vbus, PWM_PERIOD, &pwm_u, &pwm_v, &pwm_w);
+
+				TIM1->CCR1 = pwm_u;
+				TIM1->CCR2 = pwm_v;
+				TIM1->CCR3 = pwm_w;
+				TIM1->CCR4 = TIM1->ARR;
+
+			break;
+		}
+
+
 	}
   }
   /* USER CODE END StartFOC */
